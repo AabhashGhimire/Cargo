@@ -1,23 +1,212 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Hand Controlled 3D Particles</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<title>Hand Gesture Cube & Vortex</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: black;
+  }
+  video {
+    display: none;
+  }
+  canvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+  }
+</style>
 </head>
+
 <body>
 
 <video id="video" autoplay playsinline></video>
-<canvas id="three-canvas"></canvas>
+<canvas id="three"></canvas>
 
-<!-- Three.js -->
+<!-- THREE.JS -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
 
-<!-- MediaPipe Hands -->
+<!-- MEDIAPIPE -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
-<script src="script.js"></script>
+<script>
+/* =========================
+   THREE.JS SETUP
+========================= */
+const scene = new THREE.Scene();
+
+const camera = new THREE.PerspectiveCamera(
+  75, window.innerWidth / window.innerHeight, 0.1, 1000
+);
+camera.position.z = 5;
+
+const renderer = new THREE.WebGLRenderer({
+  canvas: document.getElementById("three"),
+  alpha: true,
+  antialias: true
+});
+renderer.setSize(window.innerWidth, window.innerHeight);
+
+/* =========================
+   LIGHT
+========================= */
+const light = new THREE.PointLight(0xffffff, 1);
+light.position.set(5, 5, 5);
+scene.add(light);
+
+/* =========================
+   CUBE
+========================= */
+const cube = new THREE.Mesh(
+  new THREE.BoxGeometry(1.5, 1.5, 1.5),
+  new THREE.MeshStandardMaterial({
+    color: 0x00ffff,
+    metalness: 0.7,
+    roughness: 0.2
+  })
+);
+scene.add(cube);
+
+/* =========================
+   VORTEX PARTICLES
+========================= */
+const vortexCount = 1800;
+const vortexGeo = new THREE.BufferGeometry();
+const vortexPos = new Float32Array(vortexCount * 3);
+
+for (let i = 0; i < vortexPos.length; i += 3) {
+  const angle = Math.random() * Math.PI * 2;
+  const radius = Math.random() * 2;
+  vortexPos[i] = Math.cos(angle) * radius;
+  vortexPos[i + 1] = Math.sin(angle) * radius;
+  vortexPos[i + 2] = (Math.random() - 0.5) * 5;
+}
+
+vortexGeo.setAttribute(
+  "position",
+  new THREE.BufferAttribute(vortexPos, 3)
+);
+
+const vortex = new THREE.Points(
+  vortexGeo,
+  new THREE.PointsMaterial({
+    color: 0xff00ff,
+    size: 0.03
+  })
+);
+
+vortex.visible = false;
+scene.add(vortex);
+
+/* =========================
+   HAND TRACKING
+========================= */
+let isPinching = false;
+let pinchX = 0;
+let pinchY = 0;
+let showVortex = false;
+let lastFive = false;
+
+function isFiveFingers(lm) {
+  return (
+    lm[8].y < lm[6].y &&
+    lm[12].y < lm[10].y &&
+    lm[16].y < lm[14].y &&
+    lm[20].y < lm[18].y &&
+    lm[4].x < lm[3].x
+  );
+}
+
+const hands = new Hands({
+  locateFile: f =>
+    `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+});
+
+hands.setOptions({
+  maxNumHands: 1,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.7,
+  minTrackingConfidence: 0.7
+});
+
+hands.onResults(res => {
+  if (!res.multiHandLandmarks.length) return;
+
+  const lm = res.multiHandLandmarks[0];
+
+  // PINCH
+  const thumb = lm[4];
+  const index = lm[8];
+  const dist = Math.hypot(
+    thumb.x - index.x,
+    thumb.y - index.y
+  );
+
+  isPinching = dist < 0.05;
+
+  pinchX = (index.x - 0.5) * 2;
+  pinchY = -(index.y - 0.5) * 2;
+
+  // FIVE FINGER TOGGLE
+  const five = isFiveFingers(lm);
+  if (five && !lastFive) {
+    showVortex = !showVortex;
+  }
+  lastFive = five;
+});
+
+/* =========================
+   CAMERA FEED
+========================= */
+const video = document.getElementById("video");
+const cam = new Camera(video, {
+  onFrame: async () => {
+    await hands.send({ image: video });
+  },
+  width: 640,
+  height: 480
+});
+cam.start();
+
+/* =========================
+   ANIMATION LOOP
+========================= */
+function animate() {
+  requestAnimationFrame(animate);
+
+  cube.visible = !showVortex;
+  vortex.visible = showVortex;
+
+  // PINCH ROTATION
+  if (isPinching && cube.visible) {
+    cube.rotation.y += pinchX * 0.12;
+    cube.rotation.x += pinchY * 0.12;
+  }
+
+  // VORTEX MOTION
+  if (showVortex) {
+    vortex.rotation.z += 0.03;
+    vortex.rotation.y += 0.015;
+  }
+
+  renderer.render(scene, camera);
+}
+animate();
+
+/* =========================
+   RESIZE
+========================= */
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+
 </body>
 </html>
